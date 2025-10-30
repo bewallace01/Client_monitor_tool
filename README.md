@@ -444,6 +444,23 @@ Configure application settings via the **⚙️ Settings** page in the UI:
 
 ---
 
+## 📐 Relevance Scoring (How it works)
+
+- For NewsAPI-sourced items (when AI classification is not used), a simple heuristic is applied in `newsapi_service`:
+  - +0.5 if the client name appears in the title
+  - +0.3 if the client name appears in the description
+  - +0.2 if the client name appears in the content
+  - +0.1 bonus if the article was published within the last 7 days
+  - The score is capped at 1.0
+
+- When the AI classifier is enabled, its `relevance_score` (if provided) is used for the event instead of the heuristic.
+
+- Deduplication rules (to avoid creating duplicate events):
+  - URL match: considered duplicate only if an event with the same URL was discovered in the last 7 days
+  - Title match: considered duplicate only if the same title was seen from the same source within the last 24 hours
+
+These defaults aim to reduce noise while allowing genuinely new items through. You can adjust windows or logic in `app/services/automation_engine_service.py` and `app/services/newsapi_service.py`.
+
 ## 🤝 Contributing
 
 We welcome contributions! Here's how to get started:
