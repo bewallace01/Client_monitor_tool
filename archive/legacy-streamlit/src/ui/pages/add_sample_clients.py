@@ -1,0 +1,230 @@
+"""Add sample clients for testing and demo purposes."""
+
+import streamlit as st
+import uuid
+from datetime import datetime, timedelta
+import random
+
+from src.storage import SQLiteStorage
+from src.models.client_dto import ClientDTO
+
+
+# Sample data
+SAMPLE_COMPANIES = [
+    {"name": "TechVision Systems", "industry": "Technology", "priority": "High", "owner": "Sarah Chen"},
+    {"name": "CloudScale Solutions", "industry": "SaaS", "priority": "High", "owner": "Michael Rodriguez"},
+    {"name": "HealthTech Innovations", "industry": "Healthcare", "priority": "Medium", "owner": "Emily Thompson"},
+    {"name": "FinanceFlow Pro", "industry": "Finance", "priority": "High", "owner": "David Kim"},
+    {"name": "RetailHub Commerce", "industry": "E-commerce", "priority": "Medium", "owner": "Jessica Martinez"},
+    {"name": "DataInsight Analytics", "industry": "Technology", "priority": "High", "owner": "Robert Taylor"},
+    {"name": "EduLearn Platform", "industry": "Education", "priority": "Low", "owner": "Sarah Chen"},
+    {"name": "GreenEnergy Systems", "industry": "Energy", "priority": "Medium", "owner": "Michael Rodriguez"},
+    {"name": "MediaStream Networks", "industry": "Media", "priority": "Medium", "owner": "Emily Thompson"},
+    {"name": "SecureGuard Technologies", "industry": "Technology", "priority": "High", "owner": "David Kim"},
+]
+
+KEYWORDS_BY_COMPANY = {
+    "TechVision Systems": ["TechVision", "TV Systems", "TechVision Inc"],
+    "CloudScale Solutions": ["CloudScale", "Cloud Scale", "CloudScale Inc"],
+    "HealthTech Innovations": ["HealthTech", "HT Innovations", "HealthTech Inc"],
+    "FinanceFlow Pro": ["FinanceFlow", "FinFlow", "FinanceFlow Systems"],
+    "RetailHub Commerce": ["RetailHub", "RH Commerce", "RetailHub Inc"],
+    "DataInsight Analytics": ["DataInsight", "DI Analytics", "DataInsight Inc"],
+    "EduLearn Platform": ["EduLearn", "Edu Learn", "EduLearn Systems"],
+    "GreenEnergy Systems": ["GreenEnergy", "Green Energy", "GreenEnergy Inc"],
+    "MediaStream Networks": ["MediaStream", "Media Stream", "MediaStream Inc"],
+    "SecureGuard Technologies": ["SecureGuard", "Secure Guard", "SecureGuard Tech"],
+}
+
+DESCRIPTIONS = [
+    "Leading enterprise software provider focused on digital transformation.",
+    "Innovative cloud infrastructure platform serving Fortune 500 companies.",
+    "Healthcare technology startup revolutionizing patient care delivery.",
+    "Financial technology company providing payment processing solutions.",
+    "E-commerce platform connecting retailers with consumers worldwide.",
+    "Advanced analytics and business intelligence software provider.",
+    "Online education platform offering courses to millions of students.",
+    "Renewable energy solutions provider for commercial enterprises.",
+    "Streaming media technology company serving global audiences.",
+    "Cybersecurity solutions protecting enterprise networks.",
+]
+
+
+def add_sample_clients(storage: SQLiteStorage, count: int = 10):
+    """
+    Add sample clients to the database.
+
+    Args:
+        storage: SQLiteStorage instance
+        count: Number of sample clients to add (max 10)
+
+    Returns:
+        List of created client IDs
+    """
+    created_ids = []
+    count = min(count, len(SAMPLE_COMPANIES))
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, company_data in enumerate(SAMPLE_COMPANIES[:count]):
+        # Update progress
+        progress = (i + 1) / count
+        progress_bar.progress(progress)
+        status_text.text(f"Creating {company_data['name']}... ({i + 1}/{count})")
+
+        # Check if client already exists
+        existing_clients = storage.get_all_clients()
+        if any(c.name == company_data['name'] for c in existing_clients):
+            status_text.text(f"⚠️ {company_data['name']} already exists, skipping...")
+            continue
+
+        # Create client
+        client = ClientDTO(
+            id=str(uuid.uuid4()),
+            name=company_data['name'],
+            industry=company_data['industry'],
+            description=DESCRIPTIONS[i],
+            tier=company_data['priority'],
+            account_owner=company_data['owner'],
+            keywords=KEYWORDS_BY_COMPANY.get(company_data['name'], []),
+            is_active=True,
+            metadata={
+                "sample_data": True,
+                "created_by": "sample_generator"
+            }
+        )
+
+        try:
+            storage.create_client(client)
+            created_ids.append(client.id)
+
+            # Simulate some clients being checked recently
+            if random.random() > 0.5:
+                days_ago = random.randint(0, 7)
+                storage.update_client(client.id, {
+                    'last_checked': datetime.utcnow() - timedelta(days=days_ago)
+                })
+
+        except Exception as e:
+            status_text.error(f"❌ Error creating {company_data['name']}: {e}")
+
+    progress_bar.progress(1.0)
+    status_text.text("✅ Sample clients created successfully!")
+
+    return created_ids
+
+
+def render_add_sample_clients_page():
+    """Render the add sample clients page."""
+    st.markdown('<h1 class="main-header">Add Sample Clients</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Quickly populate your database with realistic sample data</p>', unsafe_allow_html=True)
+
+    st.info("""
+    👋 **Welcome!** This tool will help you get started by adding sample clients to your database.
+
+    **What you'll get:**
+    - 10 diverse companies across different industries
+    - Realistic company names and descriptions
+    - Mix of priorities (High/Medium/Low)
+    - Alternative names/keywords for each company
+    - Assigned account owners
+    """)
+
+    st.divider()
+
+    # Preview of sample clients
+    with st.expander("📋 Preview Sample Clients"):
+        for i, company in enumerate(SAMPLE_COMPANIES, 1):
+            priority_colors = {
+                "High": "🔴",
+                "Medium": "🟡",
+                "Low": "🟢"
+            }
+            st.write(f"{i}. **{company['name']}** {priority_colors[company['priority']]} {company['priority']} - {company['industry']}")
+
+    st.divider()
+
+    # Initialize storage
+    storage = SQLiteStorage()
+    storage.connect()
+
+    # Check existing clients
+    existing_clients = storage.get_all_clients()
+    existing_names = [c.name for c in existing_clients]
+    existing_sample_count = sum(1 for c in existing_clients if c.name in [s['name'] for s in SAMPLE_COMPANIES])
+
+    if existing_sample_count > 0:
+        st.warning(f"⚠️ {existing_sample_count} sample clients already exist in your database.")
+
+    # Add clients button
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        if st.button("✨ Add 10 Sample Clients", type="primary", use_container_width=True):
+            st.session_state.adding_samples = True
+            st.rerun()
+
+    with col2:
+        if st.button("🗑️ Remove All Sample Clients", use_container_width=True):
+            st.session_state.removing_samples = True
+            st.rerun()
+
+    # Process adding samples
+    if st.session_state.get('adding_samples', False):
+        st.divider()
+        st.subheader("Creating Sample Clients...")
+
+        created_ids = add_sample_clients(storage, count=10)
+
+        st.success(f"🎉 Successfully created {len(created_ids)} sample clients!")
+
+        # Clear state
+        st.session_state.adding_samples = False
+
+        # View clients button
+        if st.button("👥 View Clients", type="primary"):
+            st.switch_page("pages/clients.py")
+
+        # Refresh dashboard button
+        if st.button("📊 Go to Dashboard"):
+            st.session_state.page = "📊 Dashboard"
+            st.rerun()
+
+    # Process removing samples
+    if st.session_state.get('removing_samples', False):
+        st.divider()
+        st.warning("⚠️ Are you sure you want to remove all sample clients? This action cannot be undone.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("✅ Yes, Remove All", type="primary", use_container_width=True):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                removed_count = 0
+                sample_names = [s['name'] for s in SAMPLE_COMPANIES]
+
+                for i, client in enumerate(existing_clients):
+                    if client.name in sample_names:
+                        progress = (i + 1) / len(existing_clients)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Removing {client.name}...")
+
+                        try:
+                            storage.delete_client(client.id)
+                            removed_count += 1
+                        except Exception as e:
+                            status_text.error(f"Error removing {client.name}: {e}")
+
+                progress_bar.progress(1.0)
+                status_text.text(f"✅ Removed {removed_count} sample clients")
+
+                st.session_state.removing_samples = False
+                st.rerun()
+
+        with col2:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.removing_samples = False
+                st.rerun()

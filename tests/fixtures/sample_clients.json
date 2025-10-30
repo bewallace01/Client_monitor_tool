@@ -1,0 +1,58 @@
+{
+  "clients": [
+    {
+      "id": "test-client-1",
+      "name": "Acme Corporation",
+      "industry": "Technology",
+      "domain": "acme.com",
+      "description": "Leading enterprise software provider",
+      "priority": "high",
+      "tier": "Enterprise",
+      "account_owner": "John Doe",
+      "keywords": ["enterprise software", "cloud computing", "SaaS"],
+      "monitoring_since": "2024-01-01T00:00:00",
+      "last_checked": "2024-10-15T10:00:00",
+      "is_active": true,
+      "metadata": {
+        "revenue": "$500M",
+        "employees": 5000
+      }
+    },
+    {
+      "id": "test-client-2",
+      "name": "TechStart Inc",
+      "industry": "Technology",
+      "domain": "techstart.io",
+      "description": "Innovative AI startup",
+      "priority": "medium",
+      "tier": "Growth",
+      "account_owner": "Jane Smith",
+      "keywords": ["artificial intelligence", "machine learning", "startup"],
+      "monitoring_since": "2024-06-01T00:00:00",
+      "last_checked": "2024-10-15T09:00:00",
+      "is_active": true,
+      "metadata": {
+        "funding_round": "Series B",
+        "employees": 150
+      }
+    },
+    {
+      "id": "test-client-3",
+      "name": "Global Finance Corp",
+      "industry": "Financial Services",
+      "domain": "globalfinance.com",
+      "description": "International financial services provider",
+      "priority": "high",
+      "tier": "Enterprise",
+      "account_owner": "Bob Johnson",
+      "keywords": ["finance", "banking", "fintech"],
+      "monitoring_since": "2023-01-01T00:00:00",
+      "last_checked": "2024-10-14T18:00:00",
+      "is_active": true,
+      "metadata": {
+        "revenue": "$2B",
+        "locations": 50
+      }
+    }
+  ]
+}

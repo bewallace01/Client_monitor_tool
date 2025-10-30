@@ -1,0 +1,505 @@
+"""Analytics Dashboard with charts, metrics, and trends for executive presentations."""
+
+import streamlit as st
+from datetime import datetime, timedelta
+from typing import List, Dict, Tuple
+import pandas as pd
+from collections import Counter, defaultdict
+import io
+
+from src.storage import SQLiteStorage
+from src.models import Event
+
+
+def calculate_metrics(events: List[Event], clients_dict: Dict) -> Dict:
+    """Calculate key metrics from events."""
+    if not events:
+        return {
+            "total_events": 0,
+            "most_active_client": "N/A",
+            "most_common_type": "N/A",
+            "avg_events_per_client": 0
+        }
+
+    # Total events
+    total_events = len(events)
+
+    # Most active client
+    client_counts = Counter(e.client_id for e in events)
+    most_active_client_id = client_counts.most_common(1)[0][0] if client_counts else None
+    most_active_client = clients_dict.get(most_active_client_id, "Unknown") if most_active_client_id else "N/A"
+
+    # Most common event type
+    type_counts = Counter(e.category for e in events)
+    most_common_type = type_counts.most_common(1)[0][0] if type_counts else "N/A"
+
+    # Average events per client
+    unique_clients = len(set(e.client_id for e in events))
+    avg_events_per_client = total_events / unique_clients if unique_clients > 0 else 0
+
+    return {
+        "total_events": total_events,
+        "most_active_client": most_active_client,
+        "most_common_type": most_common_type,
+        "avg_events_per_client": round(avg_events_per_client, 1)
+    }
+
+
+def prepare_events_over_time_data(events: List[Event]) -> pd.DataFrame:
+    """Prepare data for events over time line chart."""
+    if not events:
+        return pd.DataFrame(columns=["Date", "Events"])
+
+    # Group by date
+    date_counts = Counter(e.published_date.date() for e in events)
+
+    # Create date range
+    min_date = min(date_counts.keys()) if date_counts else datetime.now().date()
+    max_date = max(date_counts.keys()) if date_counts else datetime.now().date()
+
+    date_range = pd.date_range(start=min_date, end=max_date, freq='D')
+
+    # Fill in counts (0 for missing dates)
+    data = []
+    for date in date_range:
+        data.append({
+            "Date": date.strftime("%Y-%m-%d"),
+            "Events": date_counts.get(date.date(), 0)
+        })
+
+    return pd.DataFrame(data)
+
+
+def prepare_events_by_type_data(events: List[Event]) -> pd.DataFrame:
+    """Prepare data for events by type donut chart."""
+    if not events:
+        return pd.DataFrame(columns=["Type", "Count"])
+
+    type_counts = Counter(e.category for e in events)
+
+    data = [{"Type": type_name, "Count": count} for type_name, count in type_counts.items()]
+    return pd.DataFrame(data)
+
+
+def prepare_events_by_client_data(events: List[Event], clients_dict: Dict, top_n: int = 10) -> pd.DataFrame:
+    """Prepare data for events by client bar chart (top N)."""
+    if not events:
+        return pd.DataFrame(columns=["Client", "Events"])
+
+    client_counts = Counter(e.client_id for e in events)
+    top_clients = client_counts.most_common(top_n)
+
+    data = [
+        {"Client": clients_dict.get(client_id, "Unknown"), "Events": count}
+        for client_id, count in top_clients
+    ]
+
+    return pd.DataFrame(data)
+
+
+def prepare_sentiment_trends_data(events: List[Event]) -> pd.DataFrame:
+    """Prepare data for sentiment trends stacked area chart."""
+    if not events:
+        return pd.DataFrame(columns=["Date", "Positive", "Neutral", "Negative"])
+
+    # Group by date and sentiment
+    date_sentiment_counts = defaultdict(lambda: {"Positive": 0, "Neutral": 0, "Negative": 0})
+
+    for event in events:
+        date_key = event.published_date.date()
+        sentiment = event.sentiment.capitalize() if event.sentiment else "Neutral"
+        if sentiment in ["Positive", "Neutral", "Negative"]:
+            date_sentiment_counts[date_key][sentiment] += 1
+
+    # Create date range
+    if date_sentiment_counts:
+        min_date = min(date_sentiment_counts.keys())
+        max_date = max(date_sentiment_counts.keys())
+        date_range = pd.date_range(start=min_date, end=max_date, freq='D')
+    else:
+        date_range = [datetime.now().date()]
+
+    # Build data
+    data = []
+    for date in date_range:
+        date_key = date.date() if hasattr(date, 'date') else date
+        counts = date_sentiment_counts.get(date_key, {"Positive": 0, "Neutral": 0, "Negative": 0})
+        data.append({
+            "Date": date.strftime("%Y-%m-%d") if hasattr(date, 'strftime') else str(date),
+            "Positive": counts["Positive"],
+            "Neutral": counts["Neutral"],
+            "Negative": counts["Negative"]
+        })
+
+    return pd.DataFrame(data)
+
+
+def prepare_source_distribution_data(events: List[Event]) -> pd.DataFrame:
+    """Prepare data for source distribution."""
+    if not events:
+        return pd.DataFrame(columns=["Source", "Articles"])
+
+    source_counts = Counter(e.source_name for e in events if e.source_name)
+
+    data = [{"Source": source, "Articles": count} for source, count in source_counts.most_common(10)]
+    return pd.DataFrame(data)
+
+
+def analyze_trends(events: List[Event], clients_dict: Dict, days_back: int = 30) -> Dict:
+    """Analyze trends in the data."""
+    if not events:
+        return {
+            "increasing_activity": [],
+            "no_recent_events": [],
+            "emerging_types": [],
+            "most_mentioned": []
+        }
+
+    cutoff_date = datetime.now() - timedelta(days=days_back)
+    recent_events = [e for e in events if e.published_date >= cutoff_date]
+    older_events = [e for e in events if e.published_date < cutoff_date]
+
+    # Clients with increasing activity
+    recent_client_counts = Counter(e.client_id for e in recent_events)
+    older_client_counts = Counter(e.client_id for e in older_events)
+
+    increasing_activity = []
+    for client_id, recent_count in recent_client_counts.items():
+        older_count = older_client_counts.get(client_id, 0)
+        if older_count > 0:
+            increase_pct = ((recent_count - older_count) / older_count) * 100
+            if increase_pct > 20:  # More than 20% increase
+                increasing_activity.append({
+                    "client": clients_dict.get(client_id, "Unknown"),
+                    "increase": f"+{increase_pct:.0f}%",
+                    "recent_events": recent_count
+                })
+        elif recent_count >= 3:  # New activity
+            increasing_activity.append({
+                "client": clients_dict.get(client_id, "Unknown"),
+                "increase": "New",
+                "recent_events": recent_count
+            })
+
+    # Sort by recent events
+    increasing_activity.sort(key=lambda x: x["recent_events"], reverse=True)
+
+    # Clients with no recent events
+    all_client_ids = set(e.client_id for e in events)
+    recent_client_ids = set(e.client_id for e in recent_events)
+    no_recent_clients = all_client_ids - recent_client_ids
+
+    no_recent_events = [
+        {"client": clients_dict.get(cid, "Unknown"), "last_seen": "30+ days ago"}
+        for cid in no_recent_clients
+    ]
+
+    # Emerging event types
+    recent_type_counts = Counter(e.category for e in recent_events)
+    older_type_counts = Counter(e.category for e in older_events)
+
+    emerging_types = []
+    for event_type, recent_count in recent_type_counts.items():
+        older_count = older_type_counts.get(event_type, 0)
+        if older_count > 0:
+            increase_pct = ((recent_count - older_count) / older_count) * 100
+            if increase_pct > 30:  # More than 30% increase
+                emerging_types.append({
+                    "type": event_type,
+                    "change": f"+{increase_pct:.0f}%",
+                    "count": recent_count
+                })
+        elif recent_count >= 2:  # New type
+            emerging_types.append({
+                "type": event_type,
+                "change": "New",
+                "count": recent_count
+            })
+
+    # Sort by count
+    emerging_types.sort(key=lambda x: x["count"], reverse=True)
+
+    # Most mentioned clients
+    most_mentioned = [
+        {"client": clients_dict.get(client_id, "Unknown"), "mentions": count}
+        for client_id, count in recent_client_counts.most_common(5)
+    ]
+
+    return {
+        "increasing_activity": increasing_activity[:5],
+        "no_recent_events": no_recent_events[:5],
+        "emerging_types": emerging_types[:5],
+        "most_mentioned": most_mentioned
+    }
+
+
+def export_to_csv(events: List[Event], clients_dict: Dict) -> str:
+    """Export events to CSV format."""
+    data = []
+    for event in events:
+        data.append({
+            "Date": event.published_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "Client": clients_dict.get(event.client_id, "Unknown"),
+            "Title": event.title,
+            "Category": event.category,
+            "Sentiment": event.sentiment,
+            "Relevance Score": f"{event.relevance_score:.2f}",
+            "Source": event.source_name,
+            "URL": event.source_url
+        })
+
+    df = pd.DataFrame(data)
+    return df.to_csv(index=False)
+
+
+def render_insights_page():
+    """Main analytics dashboard page."""
+    st.markdown('<h1 class="main-header">📊 Analytics & Insights</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Data-driven intelligence for executive decision making</p>', unsafe_allow_html=True)
+
+    # Initialize storage
+    storage = SQLiteStorage()
+    storage.connect()
+
+    # Get all clients for lookup
+    clients = storage.get_all_clients()
+    clients_dict = {c.id: c.name for c in clients}
+
+    # Time period selector
+    st.markdown("### 📅 Time Period")
+
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        period_preset = st.selectbox(
+            "Quick Select",
+            options=["Last 7 Days", "Last 30 Days", "Last 90 Days", "Last 6 Months", "Last Year", "All Time", "Custom Range"],
+            index=1
+        )
+
+    # Calculate date range
+    if period_preset == "Last 7 Days":
+        start_date = datetime.now() - timedelta(days=7)
+        end_date = datetime.now()
+    elif period_preset == "Last 30 Days":
+        start_date = datetime.now() - timedelta(days=30)
+        end_date = datetime.now()
+    elif period_preset == "Last 90 Days":
+        start_date = datetime.now() - timedelta(days=90)
+        end_date = datetime.now()
+    elif period_preset == "Last 6 Months":
+        start_date = datetime.now() - timedelta(days=180)
+        end_date = datetime.now()
+    elif period_preset == "Last Year":
+        start_date = datetime.now() - timedelta(days=365)
+        end_date = datetime.now()
+    elif period_preset == "All Time":
+        start_date = datetime.now() - timedelta(days=3650)  # 10 years
+        end_date = datetime.now()
+    else:  # Custom Range
+        with col2:
+            date_range = st.date_input(
+                "Select Date Range",
+                value=(datetime.now() - timedelta(days=30), datetime.now()),
+                max_value=datetime.now()
+            )
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                start_date = datetime.combine(date_range[0], datetime.min.time())
+                end_date = datetime.combine(date_range[1], datetime.max.time())
+            else:
+                start_date = datetime.now() - timedelta(days=30)
+                end_date = datetime.now()
+
+    # Filter events by date range
+    all_events = storage.get_all_events()
+    events = [e for e in all_events if start_date <= e.published_date <= end_date]
+
+    st.divider()
+
+    # Key Metrics Cards
+    st.markdown("### 📈 Key Metrics")
+
+    metrics = calculate_metrics(events, clients_dict)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            label="Total Events Tracked",
+            value=metrics["total_events"],
+            delta=f"{len(events)} in period"
+        )
+
+    with col2:
+        st.metric(
+            label="Most Active Client",
+            value=metrics["most_active_client"]
+        )
+
+    with col3:
+        st.metric(
+            label="Most Common Event Type",
+            value=metrics["most_common_type"]
+        )
+
+    with col4:
+        st.metric(
+            label="Avg Events per Client",
+            value=metrics["avg_events_per_client"]
+        )
+
+    st.divider()
+
+    # Charts Section
+    st.markdown("### 📊 Visual Analytics")
+
+    # Row 1: Events over time
+    st.markdown("#### 📈 Events Over Time")
+    events_over_time_df = prepare_events_over_time_data(events)
+
+    if not events_over_time_df.empty:
+        st.line_chart(events_over_time_df.set_index("Date"))
+    else:
+        st.info("No events to display for this time period.")
+
+    # Row 2: Events by type and client
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### 🎯 Events by Type")
+        events_by_type_df = prepare_events_by_type_data(events)
+
+        if not events_by_type_df.empty:
+            # Using bar chart as donut isn't natively supported in streamlit
+            st.bar_chart(events_by_type_df.set_index("Type"))
+        else:
+            st.info("No events to display.")
+
+    with col2:
+        st.markdown("#### 👥 Top 10 Clients by Events")
+        events_by_client_df = prepare_events_by_client_data(events, clients_dict)
+
+        if not events_by_client_df.empty:
+            st.bar_chart(events_by_client_df.set_index("Client"))
+        else:
+            st.info("No events to display.")
+
+    # Row 3: Sentiment trends
+    st.markdown("#### 😊 Sentiment Trends")
+    sentiment_df = prepare_sentiment_trends_data(events)
+
+    if not sentiment_df.empty:
+        st.area_chart(sentiment_df.set_index("Date"))
+    else:
+        st.info("No sentiment data to display.")
+
+    # Row 4: Source distribution
+    st.markdown("#### 📰 Top News Sources")
+    source_df = prepare_source_distribution_data(events)
+
+    if not source_df.empty:
+        st.bar_chart(source_df.set_index("Source"))
+    else:
+        st.info("No source data to display.")
+
+    st.divider()
+
+    # Export Data
+    st.markdown("### 📥 Export Data")
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+
+    with col1:
+        st.markdown("Download all events in this time period as CSV for further analysis")
+
+    with col2:
+        if st.button("📊 Export to CSV", use_container_width=True):
+            csv_data = export_to_csv(events, clients_dict)
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv_data,
+                file_name=f"events_export_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+    st.divider()
+
+    # Trends Section
+    st.markdown("### 🔍 Trends & Insights")
+    st.markdown("**Actionable intelligence for strategic decision making**")
+
+    trends = analyze_trends(events, clients_dict, days_back=30)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Clients with increasing activity
+        st.markdown("#### 📈 Clients with Increasing Activity")
+        if trends["increasing_activity"]:
+            for item in trends["increasing_activity"]:
+                st.markdown(f"**{item['client']}** - {item['increase']} ({item['recent_events']} events)")
+        else:
+            st.info("No significant increases detected")
+
+        st.markdown("---")
+
+        # Emerging event types
+        st.markdown("#### 🆕 Emerging Event Types")
+        if trends["emerging_types"]:
+            for item in trends["emerging_types"]:
+                st.markdown(f"**{item['type']}** - {item['change']} ({item['count']} events)")
+        else:
+            st.info("No emerging trends detected")
+
+    with col2:
+        # Clients with no recent events
+        st.markdown("#### ⚠️ Clients Needing Attention")
+        st.caption("No events in last 30 days - may need proactive outreach")
+        if trends["no_recent_events"]:
+            for item in trends["no_recent_events"]:
+                st.markdown(f"**{item['client']}** - {item['last_seen']}")
+        else:
+            st.success("All clients have recent activity")
+
+        st.markdown("---")
+
+        # Most mentioned clients
+        st.markdown("#### 🔥 Most Mentioned in News")
+        if trends["most_mentioned"]:
+            for item in trends["most_mentioned"]:
+                st.markdown(f"**{item['client']}** - {item['mentions']} mentions")
+        else:
+            st.info("No data available")
+
+    # Executive Summary
+    st.divider()
+    st.markdown("### 💼 Executive Summary")
+
+    summary_col1, summary_col2 = st.columns([2, 1])
+
+    with summary_col1:
+        st.markdown(f"""
+        **Period:** {start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}
+
+        **Key Findings:**
+        - Tracked **{metrics['total_events']}** events across **{len(clients_dict)}** clients
+        - **{metrics['most_active_client']}** was the most active client
+        - **{metrics['most_common_type']}** was the dominant event category
+        - Average of **{metrics['avg_events_per_client']}** events per client
+
+        **Recommendations:**
+        - Monitor clients with increasing activity for potential opportunities
+        - Reach out to clients with no recent events
+        - Track emerging event types for market trends
+        """)
+
+    with summary_col2:
+        if trends["increasing_activity"]:
+            st.success(f"✅ {len(trends['increasing_activity'])} clients showing growth")
+
+        if trends["no_recent_events"]:
+            st.warning(f"⚠️ {len(trends['no_recent_events'])} clients need attention")
+
+        if trends["emerging_types"]:
+            st.info(f"🆕 {len(trends['emerging_types'])} emerging trends")

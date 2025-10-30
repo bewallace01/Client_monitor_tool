@@ -1,0 +1,493 @@
+"""Professional client management interface."""
+
+import streamlit as st
+from datetime import datetime
+from typing import Optional
+import uuid
+
+from src.storage import SQLiteStorage
+from src.models.client_dto import ClientDTO
+
+
+# Industry suggestions
+INDUSTRY_OPTIONS = [
+    "Technology", "SaaS", "Healthcare", "Finance", "E-commerce",
+    "Manufacturing", "Retail", "Education", "Real Estate", "Media",
+    "Telecommunications", "Energy", "Transportation", "Consulting", "Other"
+]
+
+
+def render_client_form(
+    storage: SQLiteStorage,
+    mode: str = "add",
+    client: Optional[ClientDTO] = None
+):
+    """
+    Render add or edit client form.
+
+    Args:
+        storage: Database storage instance
+        mode: "add" or "edit"
+        client: Existing client (for edit mode)
+    """
+    form_title = "➕ Add New Client" if mode == "add" else "✏️ Edit Client"
+
+    with st.form(f"{mode}_client_form"):
+        st.subheader(form_title)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            name = st.text_input(
+                "Client Name *",
+                value=client.name if client else "",
+                placeholder="e.g., Acme Corporation",
+                help="Official company name"
+            )
+
+            industry = st.selectbox(
+                "Industry",
+                options=[""] + INDUSTRY_OPTIONS,
+                index=INDUSTRY_OPTIONS.index(client.industry) + 1 if client and client.industry in INDUSTRY_OPTIONS else 0,
+                help="Primary business sector"
+            )
+
+            priority = st.radio(
+                "Priority *",
+                options=["high", "medium", "low"],
+                index=["high", "medium", "low"].index(client.tier.lower()) if client and client.tier else 1,
+                horizontal=True,
+                help="Client priority level for monitoring"
+            )
+
+        with col2:
+            account_owner = st.text_input(
+                "Account Owner",
+                value=client.account_owner if client and client.account_owner else "",
+                placeholder="Your name",
+                help="Person responsible for this account"
+            )
+
+            is_active = st.checkbox(
+                "Active",
+                value=client.is_active if client else True,
+                help="Include in monitoring scans"
+            )
+
+            # Placeholder for future features
+            st.caption("💡 Account value & renewal date coming soon")
+
+        st.markdown("---")
+
+        keywords = st.text_area(
+            "Alternative Names / Keywords",
+            value="\n".join(client.keywords) if client and client.keywords else "",
+            height=100,
+            placeholder="Enter alternative company names or search keywords (one per line)\ne.g., Acme Corp\nAcme Inc",
+            help="Used to improve search results"
+        )
+
+        description = st.text_area(
+            "Notes",
+            value=client.description if client and client.description else "",
+            height=80,
+            placeholder="Any relevant notes about this client...",
+            help="Internal notes (not visible to client)"
+        )
+
+        # Form buttons
+        col1, col2, col3 = st.columns([2, 1, 1])
+
+        with col1:
+            submit_label = "💾 Save Client" if mode == "add" else "✅ Update Client"
+            submitted = st.form_submit_button(submit_label, type="primary", use_container_width=True)
+
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+        # Handle form submission
+        if cancel:
+            if 'show_add_form' in st.session_state:
+                st.session_state.show_add_form = False
+            if 'editing_client_id' in st.session_state:
+                del st.session_state.editing_client_id
+            st.rerun()
+
+        if submitted:
+            # Validation
+            if not name or len(name.strip()) == 0:
+                st.error("❌ Client name is required")
+                return
+
+            if len(name) > 200:
+                st.error("❌ Client name must be 200 characters or less")
+                return
+
+            # Process keywords
+            keywords_list = [k.strip() for k in keywords.split('\n') if k.strip()]
+
+            try:
+                if mode == "add":
+                    # Create new client
+                    new_client = ClientDTO(
+                        id=str(uuid.uuid4()),
+                        name=name.strip(),
+                        industry=industry if industry else None,
+                        description=description.strip() if description else None,
+                        tier=priority.capitalize(),
+                        account_owner=account_owner.strip() if account_owner else None,
+                        keywords=keywords_list,
+                        is_active=is_active,
+                        metadata={}
+                    )
+                    storage.create_client(new_client)
+                    st.success(f"✅ Client '{name}' added successfully!")
+
+                    # Clear form state
+                    if 'show_add_form' in st.session_state:
+                        st.session_state.show_add_form = False
+
+                    st.rerun()
+
+                else:  # edit mode
+                    # Update existing client
+                    storage.update_client(client.id, {
+                        'name': name.strip(),
+                        'industry': industry if industry else None,
+                        'description': description.strip() if description else None,
+                        'tier': priority.capitalize(),
+                        'account_owner': account_owner.strip() if account_owner else None,
+                        'keywords': keywords_list,
+                        'is_active': is_active
+                    })
+                    st.success(f"✅ Client '{name}' updated successfully!")
+
+                    # Clear editing state
+                    if 'editing_client_id' in st.session_state:
+                        del st.session_state.editing_client_id
+
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ Error saving client: {e}")
+
+
+def render_client_card(client: ClientDTO, storage: SQLiteStorage, col_idx: int):
+    """Render a single client card."""
+    # Priority badge colors
+    priority_colors = {
+        "High": "#ef4444",
+        "Medium": "#f59e0b",
+        "Low": "#10b981"
+    }
+    priority = client.tier or "Medium"
+    priority_color = priority_colors.get(priority, "#6c757d")
+
+    # Get event count
+    events = storage.get_events_by_client(client.id)
+    event_count = len(events)
+
+    # Last checked
+    if client.last_checked:
+        time_ago = datetime.utcnow() - client.last_checked
+        if time_ago.days > 0:
+            last_checked = f"{time_ago.days}d ago"
+        elif time_ago.seconds > 3600:
+            last_checked = f"{time_ago.seconds // 3600}h ago"
+        else:
+            last_checked = f"{time_ago.seconds // 60}m ago"
+    else:
+        last_checked = "Never"
+
+    # Render card
+    with st.container(border=True):
+        # Status indicator
+        status_icon = "🟢" if client.is_active else "⚫"
+
+        # Header with name and status
+        st.markdown(f"""
+        <div style="margin-bottom: 0.5rem;">
+            <span style="font-size: 1.5em; font-weight: 600;">{status_icon} {client.name}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Priority badge
+        st.markdown(f"""
+        <div style="margin-bottom: 1rem;">
+            <span style="background-color: {priority_color}; color: white; padding: 3px 10px;
+                         border-radius: 12px; font-size: 0.75em; font-weight: 500;">
+                {priority.upper()} PRIORITY
+            </span>
+            {f'<span style="margin-left: 8px; color: #6c757d;">📊 {client.industry}</span>' if client.industry else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Metrics row
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Events", event_count)
+        with col2:
+            st.metric("Last Checked", last_checked)
+
+        # Account owner
+        if client.account_owner:
+            st.caption(f"👤 {client.account_owner}")
+
+        st.markdown("---")
+
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button("✏️ Edit", key=f"edit_{client.id}", use_container_width=True):
+                st.session_state.editing_client_id = client.id
+                st.rerun()
+
+        with col2:
+            if st.button("📊 View", key=f"view_{client.id}", use_container_width=True):
+                st.session_state.viewing_client_id = client.id
+                st.rerun()
+
+        with col3:
+            if st.button("🗑️ Delete", key=f"del_{client.id}", use_container_width=True):
+                st.session_state.deleting_client_id = client.id
+                st.rerun()
+
+
+def render_client_detail_view(client: ClientDTO, storage: SQLiteStorage):
+    """Render detailed client view."""
+    st.markdown(f"# 📊 {client.name}")
+
+    # Back button
+    if st.button("← Back to Clients"):
+        if 'viewing_client_id' in st.session_state:
+            del st.session_state.viewing_client_id
+        st.rerun()
+
+    st.divider()
+
+    # Client info section
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.subheader("📋 Details")
+        st.write(f"**Industry:** {client.industry or 'Not specified'}")
+        st.write(f"**Priority:** {client.tier or 'Medium'}")
+        st.write(f"**Status:** {'🟢 Active' if client.is_active else '⚫ Inactive'}")
+        st.write(f"**Owner:** {client.account_owner or 'Not assigned'}")
+
+    with col2:
+        st.subheader("📅 Timeline")
+        st.write(f"**Created:** {client.created_at.strftime('%Y-%m-%d') if client.created_at else 'Unknown'}")
+        st.write(f"**Updated:** {client.updated_at.strftime('%Y-%m-%d') if client.updated_at else 'Unknown'}")
+        st.write(f"**Last Check:** {client.last_checked.strftime('%Y-%m-%d %H:%M') if client.last_checked else 'Never'}")
+
+    with col3:
+        events = storage.get_events_by_client(client.id)
+        st.subheader("📊 Statistics")
+        st.metric("Total Events", len(events))
+        high_priority = len([e for e in events if hasattr(e, 'relevance_score') and e.relevance_score >= 0.7])
+        st.metric("High Priority", high_priority)
+
+    # Keywords section
+    if client.keywords:
+        st.subheader("🔍 Search Keywords")
+        keywords_text = ", ".join(client.keywords)
+        st.info(keywords_text)
+
+    # Notes section
+    if client.description:
+        st.subheader("📝 Notes")
+        st.write(client.description)
+
+    st.divider()
+
+    # Events timeline
+    st.subheader(f"📰 Recent Events ({len(events)})")
+
+    if events:
+        # Sort by published date
+        sorted_events = sorted(events, key=lambda e: e.published_date if hasattr(e, 'published_date') else datetime.min, reverse=True)
+
+        for event in sorted_events[:10]:  # Show last 10
+            with st.expander(f"📌 {event.title}", expanded=False):
+                st.write(f"**Published:** {event.published_date.strftime('%Y-%m-%d')}")
+                st.write(f"**Type:** {event.event_type}")
+                if hasattr(event, 'sentiment'):
+                    st.write(f"**Sentiment:** {event.sentiment}")
+                if hasattr(event, 'relevance_score'):
+                    st.write(f"**Relevance:** {event.relevance_score:.0%}")
+                if event.summary:
+                    st.write(event.summary)
+                if event.source_url:
+                    st.markdown(f"[🔗 Read more]({event.source_url})")
+    else:
+        st.info("No events found for this client. Run a scan to discover events!")
+
+    # Action buttons
+    st.divider()
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("✏️ Edit Client", type="primary", use_container_width=True):
+            st.session_state.editing_client_id = client.id
+            if 'viewing_client_id' in st.session_state:
+                del st.session_state.viewing_client_id
+            st.rerun()
+
+    with col2:
+        if st.button("🗑️ Delete Client", use_container_width=True):
+            st.session_state.deleting_client_id = client.id
+            st.rerun()
+
+
+def render_clients_page():
+    """Main client management page."""
+    # Initialize session state
+    if 'show_add_form' not in st.session_state:
+        st.session_state.show_add_form = False
+    if 'selected_clients' not in st.session_state:
+        st.session_state.selected_clients = set()
+
+    # Initialize storage
+    storage = SQLiteStorage()
+    storage.connect()
+
+    # Check for detail view
+    if 'viewing_client_id' in st.session_state:
+        client = storage.get_client(st.session_state.viewing_client_id)
+        if client:
+            render_client_detail_view(client, storage)
+            return
+
+    # Check for edit mode
+    if 'editing_client_id' in st.session_state:
+        client = storage.get_client(st.session_state.editing_client_id)
+        if client:
+            render_client_form(storage, mode="edit", client=client)
+            st.divider()
+
+    # Check for delete confirmation
+    if 'deleting_client_id' in st.session_state:
+        client = storage.get_client(st.session_state.deleting_client_id)
+        if client:
+            st.warning(f"⚠️ Are you sure you want to delete **{client.name}**? This action cannot be undone.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Yes, Delete", type="primary", use_container_width=True):
+                    try:
+                        storage.delete_client(client.id)
+                        st.success(f"✅ Client '{client.name}' deleted")
+                        del st.session_state.deleting_client_id
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error deleting client: {e}")
+            with col2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    del st.session_state.deleting_client_id
+                    st.rerun()
+            st.divider()
+
+    # Page header
+    st.markdown('<h1 class="main-header">Client Management</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Manage your client portfolio and monitoring settings</p>', unsafe_allow_html=True)
+
+    # Top action bar
+    col1, col2, col3 = st.columns([3, 1, 1])
+
+    with col1:
+        search_query = st.text_input("🔍 Search clients", placeholder="Search by name or industry...", label_visibility="collapsed")
+
+    with col2:
+        if st.button("➕ Add Client", use_container_width=True, type="primary"):
+            st.session_state.show_add_form = not st.session_state.show_add_form
+            st.rerun()
+
+    with col3:
+        if len(st.session_state.selected_clients) > 0:
+            if st.button(f"🗑️ Delete ({len(st.session_state.selected_clients)})", use_container_width=True):
+                st.session_state.bulk_delete = True
+                st.rerun()
+
+    # Show add form if requested
+    if st.session_state.show_add_form:
+        with st.container(border=True):
+            render_client_form(storage, mode="add")
+        st.divider()
+
+    # Filters
+    with st.expander("🔧 Filters & Sorting"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            filter_priority = st.multiselect(
+                "Priority",
+                options=["High", "Medium", "Low"],
+                default=[]
+            )
+
+        with col2:
+            filter_industry = st.multiselect(
+                "Industry",
+                options=INDUSTRY_OPTIONS,
+                default=[]
+            )
+
+        with col3:
+            sort_by = st.selectbox(
+                "Sort by",
+                options=["Name (A-Z)", "Name (Z-A)", "Recently Checked", "Event Count", "Created Date"]
+            )
+
+    st.divider()
+
+    # Get all clients
+    all_clients = storage.get_all_clients()
+
+    # Apply filters
+    filtered_clients = all_clients
+
+    # Search filter
+    if search_query:
+        filtered_clients = [
+            c for c in filtered_clients
+            if search_query.lower() in c.name.lower() or
+               (c.industry and search_query.lower() in c.industry.lower())
+        ]
+
+    # Priority filter
+    if filter_priority:
+        filtered_clients = [c for c in filtered_clients if c.tier in filter_priority]
+
+    # Industry filter
+    if filter_industry:
+        filtered_clients = [c for c in filtered_clients if c.industry in filter_industry]
+
+    # Sorting
+    if sort_by == "Name (A-Z)":
+        filtered_clients.sort(key=lambda c: c.name.lower())
+    elif sort_by == "Name (Z-A)":
+        filtered_clients.sort(key=lambda c: c.name.lower(), reverse=True)
+    elif sort_by == "Recently Checked":
+        filtered_clients.sort(key=lambda c: c.last_checked_at or datetime.min, reverse=True)
+    elif sort_by == "Event Count":
+        # Sort by event count (expensive operation)
+        client_event_counts = [(c, len(storage.get_events_by_client(c.id))) for c in filtered_clients]
+        client_event_counts.sort(key=lambda x: x[1], reverse=True)
+        filtered_clients = [c for c, _ in client_event_counts]
+    elif sort_by == "Created Date":
+        filtered_clients.sort(key=lambda c: c.created_at or datetime.min, reverse=True)
+
+    # Display count
+    st.markdown(f"**Showing {len(filtered_clients)} of {len(all_clients)} clients**")
+
+    # Render client cards in 3-column layout
+    if filtered_clients:
+        # Create rows of 3 cards
+        for i in range(0, len(filtered_clients), 3):
+            cols = st.columns(3)
+            for idx, client in enumerate(filtered_clients[i:i+3]):
+                with cols[idx]:
+                    render_client_card(client, storage, idx)
+    else:
+        st.info("📭 No clients found. Click 'Add Client' to get started!")

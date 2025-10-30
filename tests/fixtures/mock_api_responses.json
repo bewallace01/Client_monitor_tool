@@ -1,0 +1,127 @@
+{
+  "google_search_responses": {
+    "acme_corporation": {
+      "items": [
+        {
+          "title": "Acme Corporation Announces Major Product Update",
+          "link": "https://example.com/acme-product-update",
+          "snippet": "Acme Corporation today announced a major update to its flagship product, introducing new AI capabilities and improved performance.",
+          "displayLink": "example.com",
+          "pagemap": {
+            "metatags": [
+              {
+                "og:type": "article",
+                "article:published_time": "2024-10-15T10:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Acme Corporation Expands to Europe",
+          "link": "https://example.com/acme-expansion",
+          "snippet": "Enterprise software leader Acme Corporation announced plans to expand operations into Europe, opening new offices in London and Berlin.",
+          "displayLink": "example.com",
+          "pagemap": {
+            "metatags": [
+              {
+                "og:type": "article",
+                "article:published_time": "2024-10-14T14:30:00Z"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "techstart_inc": {
+      "items": [
+        {
+          "title": "TechStart Inc Wins Innovation Award",
+          "link": "https://example.com/techstart-award",
+          "snippet": "AI startup TechStart Inc has been recognized with the TechCrunch Innovation Award for its groundbreaking machine learning platform.",
+          "displayLink": "example.com",
+          "pagemap": {
+            "metatags": [
+              {
+                "og:type": "article",
+                "article:published_time": "2024-10-13T09:00:00Z"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "newsapi_responses": {
+    "acme_corporation": {
+      "status": "ok",
+      "totalResults": 2,
+      "articles": [
+        {
+          "source": {
+            "id": null,
+            "name": "TechCrunch"
+          },
+          "author": "John Reporter",
+          "title": "Acme Corporation Secures $50M in Funding",
+          "description": "Enterprise software company Acme Corporation has raised $50 million in Series C funding to accelerate growth and product development.",
+          "url": "https://example.com/acme-funding-news",
+          "urlToImage": "https://example.com/images/acme-funding.jpg",
+          "publishedAt": "2024-10-10T14:30:00Z",
+          "content": "Acme Corporation, a leading enterprise software provider, announced today that it has secured $50 million in Series C funding..."
+        },
+        {
+          "source": {
+            "id": null,
+            "name": "VentureBeat"
+          },
+          "author": "Sarah Tech",
+          "title": "How Acme is Transforming Enterprise Analytics",
+          "description": "An inside look at Acme Corporation's new AI-powered analytics platform and its impact on enterprise decision-making.",
+          "url": "https://example.com/acme-analytics-feature",
+          "urlToImage": "https://example.com/images/acme-analytics.jpg",
+          "publishedAt": "2024-10-08T11:00:00Z",
+          "content": "Acme Corporation's latest product launch represents a significant leap forward in enterprise analytics technology..."
+        }
+      ]
+    },
+    "global_finance": {
+      "status": "ok",
+      "totalResults": 1,
+      "articles": [
+        {
+          "source": {
+            "id": "reuters",
+            "name": "Reuters"
+          },
+          "author": "Finance Desk",
+          "title": "Global Finance Corp Reports Strong Q3 Earnings",
+          "description": "Global Finance Corp exceeded analyst expectations with strong third-quarter earnings driven by digital banking growth.",
+          "url": "https://example.com/globalfinance-earnings",
+          "urlToImage": "https://example.com/images/gf-earnings.jpg",
+          "publishedAt": "2024-10-14T08:00:00Z",
+          "content": "Global Finance Corp reported third-quarter earnings that surpassed Wall Street expectations, with revenue up 25% year-over-year..."
+        }
+      ]
+    }
+  },
+  "error_responses": {
+    "rate_limit_exceeded": {
+      "error": {
+        "code": 429,
+        "message": "Rate limit exceeded. Please try again later."
+      }
+    },
+    "invalid_api_key": {
+      "error": {
+        "code": 401,
+        "message": "Invalid API key provided."
+      }
+    },
+    "not_found": {
+      "error": {
+        "code": 404,
+        "message": "Resource not found."
+      }
+    }
+  }
+}

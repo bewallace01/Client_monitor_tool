@@ -1,0 +1,613 @@
+"""Reports and digest generation UI with visual builder."""
+
+import streamlit as st
+from datetime import datetime, timedelta
+from typing import Literal
+import json
+
+from src.storage import SQLiteStorage
+from src.notifiers.digest import DigestGenerator
+from src.notifiers.email import EmailNotifier
+from src.models import EventCategory
+
+
+def render_report_builder(storage: SQLiteStorage, generator: DigestGenerator):
+    """Render the visual report builder."""
+    st.markdown("### 🔧 Report Builder")
+
+    # Section 1: Report Type
+    st.markdown("#### 1️⃣ Select Report Type")
+    report_type = st.radio(
+        "Report Type",
+        options=["Daily Digest", "Weekly Summary", "Custom Report", "Client Report"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="report_type"
+    )
+
+    st.divider()
+
+    # Section 2: Parameters (dynamic based on type)
+    st.markdown("#### 2️⃣ Configure Parameters")
+
+    if report_type == "Daily Digest":
+        col1, col2 = st.columns(2)
+        with col1:
+            date_range = st.date_input(
+                "Date Range",
+                value=(datetime.now() - timedelta(days=1), datetime.now()),
+                max_value=datetime.now(),
+                key="daily_date"
+            )
+        with col2:
+            min_relevance = st.slider(
+                "Minimum Relevance",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.0,
+                step=0.1,
+                format="%.0f%%",
+                key="daily_relevance"
+            )
+
+    elif report_type == "Weekly Summary":
+        col1, col2 = st.columns(2)
+        with col1:
+            weeks_back = st.number_input(
+                "Weeks Back",
+                min_value=0,
+                max_value=52,
+                value=0,
+                key="weeks_back"
+            )
+        with col2:
+            min_relevance = st.slider(
+                "Minimum Relevance",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.0,
+                step=0.1,
+                format="%.0f%%",
+                key="weekly_relevance"
+            )
+
+    elif report_type == "Custom Report":
+        col1, col2 = st.columns(2)
+        with col1:
+            date_range = st.date_input(
+                "Date Range",
+                value=(datetime.now() - timedelta(days=7), datetime.now()),
+                max_value=datetime.now(),
+                key="custom_date"
+            )
+        with col2:
+            min_relevance = st.slider(
+                "Minimum Relevance",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.3,
+                step=0.1,
+                format="%.0f%%",
+                key="custom_relevance"
+            )
+
+        # Client selector
+        clients = storage.get_all_clients()
+        client_options = {c.id: c.name for c in clients}
+        selected_clients = st.multiselect(
+            "Select Clients (leave empty for all)",
+            options=list(client_options.values()),
+            key="custom_clients"
+        )
+
+        # Event type filter
+        all_categories = [cat.value for cat in EventCategory]
+        selected_event_types = st.multiselect(
+            "Event Types (leave empty for all)",
+            options=all_categories,
+            key="custom_event_types"
+        )
+
+    else:  # Client Report
+        col1, col2 = st.columns(2)
+        with col1:
+            clients = storage.get_all_clients()
+            client_options = {c.id: c.name for c in clients}
+            if client_options:
+                selected_client_name = st.selectbox(
+                    "Select Client",
+                    options=list(client_options.values()),
+                    key="client_select"
+                )
+                selected_client_id = [cid for cid, name in client_options.items() if name == selected_client_name][0]
+            else:
+                st.warning("No clients available")
+                selected_client_id = None
+
+        with col2:
+            days_back = st.number_input(
+                "Days to Include",
+                min_value=1,
+                max_value=365,
+                value=30,
+                key="client_days"
+            )
+
+    st.divider()
+
+    # Section 3: Format
+    st.markdown("#### 3️⃣ Choose Output Format")
+
+    format_option = st.radio(
+        "Output Format",
+        options=["📱 View in Browser", "📥 Download Markdown", "📄 Download HTML", "📧 Send Email"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="format_option"
+    )
+
+    st.divider()
+
+    # Generate Report Button
+    col1, col2, col3 = st.columns([2, 1, 1])
+
+    with col1:
+        generate_btn = st.button("🔄 Generate Report", use_container_width=True, type="primary")
+
+    with col2:
+        if st.session_state.get("last_report"):
+            save_report = st.button("💾 Save Report", use_container_width=True)
+            if save_report:
+                save_generated_report(st.session_state.last_report, storage)
+
+    with col3:
+        if st.session_state.get("last_report"):
+            clear_btn = st.button("🗑️ Clear", use_container_width=True)
+            if clear_btn:
+                del st.session_state.last_report
+                st.rerun()
+
+    if generate_btn:
+        with st.spinner("Generating report..."):
+            # Generate based on report type
+            if report_type == "Daily Digest":
+                if isinstance(date_range, tuple) and len(date_range) == 2:
+                    start_date = datetime.combine(date_range[0], datetime.min.time())
+                    end_date = datetime.combine(date_range[1], datetime.max.time())
+                else:
+                    start_date = datetime.combine(date_range, datetime.min.time())
+                    end_date = datetime.combine(date_range, datetime.max.time())
+
+                report_html = generator.generate_daily_digest(
+                    date_range=(start_date, end_date),
+                    format="html"
+                )
+                report_md = generator.generate_daily_digest(
+                    date_range=(start_date, end_date),
+                    format="markdown"
+                )
+                report_title = f"Daily Digest - {start_date.strftime('%Y-%m-%d')}"
+
+            elif report_type == "Weekly Summary":
+                report_html = generator.generate_weekly_digest(format="html")
+                report_md = generator.generate_weekly_digest(format="markdown")
+                report_title = f"Weekly Summary - Week of {datetime.now().strftime('%Y-%m-%d')}"
+
+            elif report_type == "Custom Report":
+                if isinstance(date_range, tuple) and len(date_range) == 2:
+                    start_date = datetime.combine(date_range[0], datetime.min.time())
+                    end_date = datetime.combine(date_range[1], datetime.max.time())
+                else:
+                    start_date = datetime.combine(date_range, datetime.min.time())
+                    end_date = datetime.combine(date_range, datetime.max.time())
+
+                report_html = generator.generate_daily_digest(
+                    date_range=(start_date, end_date),
+                    format="html"
+                )
+                report_md = generator.generate_daily_digest(
+                    date_range=(start_date, end_date),
+                    format="markdown"
+                )
+                report_title = f"Custom Report - {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+
+            else:  # Client Report
+                if selected_client_id:
+                    report_html = generator.generate_client_report(
+                        client_id=selected_client_id,
+                        days_back=days_back,
+                        format="html"
+                    )
+                    report_md = generator.generate_client_report(
+                        client_id=selected_client_id,
+                        days_back=days_back,
+                        format="markdown"
+                    )
+                    report_title = f"Client Report - {selected_client_name}"
+                else:
+                    st.error("Please select a client")
+                    return
+
+            # Store report in session state
+            st.session_state.last_report = {
+                "title": report_title,
+                "type": report_type,
+                "html": report_html,
+                "markdown": report_md,
+                "generated_at": datetime.now().isoformat()
+            }
+
+            # Handle format option
+            if "Download Markdown" in format_option:
+                st.download_button(
+                    label="📥 Download Markdown",
+                    data=report_md,
+                    file_name=f"{report_title.lower().replace(' ', '_')}.md",
+                    mime="text/markdown"
+                )
+                st.success("✅ Report generated! Click above to download.")
+
+            elif "Download HTML" in format_option:
+                st.download_button(
+                    label="📥 Download HTML",
+                    data=report_html,
+                    file_name=f"{report_title.lower().replace(' ', '_')}.html",
+                    mime="text/html"
+                )
+                st.success("✅ Report generated! Click above to download.")
+
+            elif "Send Email" in format_option:
+                # Show email form
+                st.success("✅ Report generated!")
+                render_email_form(report_html, report_md, report_title)
+
+            else:  # View in Browser
+                st.success("✅ Report generated!")
+                st.rerun()
+
+    # Show report preview if available
+    if st.session_state.get("last_report"):
+        render_report_preview(st.session_state.last_report, storage)
+
+
+def render_report_preview(report_data: dict, storage: SQLiteStorage):
+    """Render the report preview section."""
+    st.divider()
+    st.markdown("### 📄 Report Preview")
+
+    # Report header
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"**{report_data['title']}**")
+        st.caption(f"Generated: {datetime.fromisoformat(report_data['generated_at']).strftime('%Y-%m-%d %H:%M')}")
+    with col2:
+        st.caption(f"Type: {report_data['type']}")
+
+    # Display HTML report in iframe
+    st.components.v1.html(report_data['html'], height=600, scrolling=True)
+
+    # Action buttons
+    st.divider()
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.download_button(
+            label="📥 Download HTML",
+            data=report_data['html'],
+            file_name=f"{report_data['title'].lower().replace(' ', '_')}.html",
+            mime="text/html",
+            use_container_width=True
+        )
+
+    with col2:
+        st.download_button(
+            label="📥 Download Markdown",
+            data=report_data['markdown'],
+            file_name=f"{report_data['title'].lower().replace(' ', '_')}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+
+    with col3:
+        if st.button("📧 Email Report", use_container_width=True):
+            st.session_state.show_email_form = True
+            st.rerun()
+
+    # Email form
+    if st.session_state.get("show_email_form"):
+        render_email_form(report_data['html'], report_data['markdown'], report_data['title'])
+
+
+def render_email_form(report_html: str, report_md: str, report_title: str):
+    """Render email sending form."""
+    st.divider()
+    st.markdown("### 📧 Send Report via Email")
+
+    # Check if SMTP is configured
+    if not st.session_state.get("smtp_host"):
+        st.warning("⚠️ SMTP not configured. Please configure email settings in the Email Settings tab first.")
+        if st.button("Go to Email Settings"):
+            st.session_state.active_reports_tab = "Email Settings"
+            st.rerun()
+        return
+
+    recipient_emails = st.text_area(
+        "Recipient Emails (one per line)",
+        placeholder="user1@example.com\nuser2@example.com",
+        key="email_recipients"
+    )
+
+    subject_line = st.text_input(
+        "Subject Line",
+        value=report_title,
+        key="email_subject"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📧 Send Email", use_container_width=True, type="primary"):
+            if not recipient_emails.strip():
+                st.error("Please enter at least one recipient email")
+            else:
+                with st.spinner("Sending email..."):
+                    notifier = EmailNotifier(
+                        smtp_host=st.session_state.get("smtp_host"),
+                        smtp_port=st.session_state.get("smtp_port", 587),
+                        smtp_user=st.session_state.get("smtp_user"),
+                        smtp_password=st.session_state.get("smtp_password"),
+                        from_email=st.session_state.get("from_email"),
+                        use_tls=st.session_state.get("use_tls", True)
+                    )
+
+                    recipients = [e.strip() for e in recipient_emails.split("\n") if e.strip()]
+                    success = notifier.send_digest(
+                        to_emails=recipients,
+                        digest_html=report_html,
+                        subject=subject_line,
+                        digest_text=report_md
+                    )
+
+                    if success:
+                        st.success(f"✅ Report sent to {len(recipients)} recipient(s)!")
+                        del st.session_state.show_email_form
+                    else:
+                        st.error("❌ Failed to send email. Check your SMTP settings.")
+
+    with col2:
+        if st.button("❌ Cancel", use_container_width=True):
+            del st.session_state.show_email_form
+            st.rerun()
+
+
+def save_generated_report(report_data: dict, storage: SQLiteStorage):
+    """Save a generated report to the database."""
+    # Store in a simple JSON file for now (could be database table later)
+    import os
+    from pathlib import Path
+
+    reports_dir = Path("data/saved_reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{report_data['type'].lower().replace(' ', '_')}_{timestamp}.json"
+
+    # Save report
+    report_path = reports_dir / filename
+    with open(report_path, 'w') as f:
+        json.dump(report_data, f, indent=2)
+
+    st.success(f"✅ Report saved as: {filename}")
+
+
+def load_saved_reports():
+    """Load all saved reports."""
+    from pathlib import Path
+
+    reports_dir = Path("data/saved_reports")
+    if not reports_dir.exists():
+        return []
+
+    reports = []
+    for report_file in reports_dir.glob("*.json"):
+        try:
+            with open(report_file, 'r') as f:
+                report_data = json.load(f)
+                report_data['filename'] = report_file.name
+                reports.append(report_data)
+        except Exception as e:
+            st.warning(f"Could not load {report_file.name}: {e}")
+
+    return sorted(reports, key=lambda x: x.get('generated_at', ''), reverse=True)
+
+
+def render_saved_reports():
+    """Render saved reports table."""
+    st.markdown("### 💾 Saved Reports")
+
+    saved_reports = load_saved_reports()
+
+    if not saved_reports:
+        st.info("No saved reports yet. Generate and save a report to see it here.")
+        return
+
+    # Display reports in a table-like format
+    for report in saved_reports:
+        with st.container():
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+
+            with col1:
+                st.markdown(f"**{report['title']}**")
+
+            with col2:
+                st.caption(f"Type: {report['type']}")
+
+            with col3:
+                gen_date = datetime.fromisoformat(report['generated_at'])
+                st.caption(f"Date: {gen_date.strftime('%Y-%m-%d %H:%M')}")
+
+            with col4:
+                view_btn = st.button("👁️ View", key=f"view_{report['filename']}")
+                if view_btn:
+                    st.session_state.last_report = report
+                    st.rerun()
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.download_button(
+                        "📥",
+                        data=report['html'],
+                        file_name=report['filename'].replace('.json', '.html'),
+                        mime="text/html",
+                        key=f"dl_{report['filename']}",
+                        help="Download HTML"
+                    )
+                with col_b:
+                    delete_btn = st.button("🗑️", key=f"del_{report['filename']}", help="Delete")
+                    if delete_btn:
+                        from pathlib import Path
+                        report_path = Path("data/saved_reports") / report['filename']
+                        report_path.unlink()
+                        st.success(f"Deleted: {report['title']}")
+                        st.rerun()
+
+            st.divider()
+
+
+def render_email_settings():
+    """Render email configuration section."""
+    st.markdown("### 📧 Email Configuration")
+
+    st.info("Configure SMTP settings to send reports and alerts via email")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        smtp_host = st.text_input(
+            "SMTP Host",
+            value=st.session_state.get("smtp_host", ""),
+            placeholder="smtp.gmail.com",
+            key="smtp_host_input"
+        )
+
+        smtp_port = st.number_input(
+            "SMTP Port",
+            value=st.session_state.get("smtp_port", 587),
+            min_value=1,
+            max_value=65535,
+            key="smtp_port_input"
+        )
+
+        smtp_user = st.text_input(
+            "SMTP Username",
+            value=st.session_state.get("smtp_user", ""),
+            placeholder="your-email@gmail.com",
+            key="smtp_user_input"
+        )
+
+    with col2:
+        smtp_password = st.text_input(
+            "SMTP Password",
+            value=st.session_state.get("smtp_password", ""),
+            type="password",
+            placeholder="your-app-password",
+            key="smtp_password_input"
+        )
+
+        from_email = st.text_input(
+            "From Email",
+            value=st.session_state.get("from_email", ""),
+            placeholder="noreply@yourcompany.com",
+            key="from_email_input"
+        )
+
+        use_tls = st.checkbox(
+            "Use TLS",
+            value=st.session_state.get("use_tls", True),
+            key="use_tls_input"
+        )
+
+    # Save and test buttons
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("💾 Save Settings", use_container_width=True):
+            st.session_state.smtp_host = smtp_host
+            st.session_state.smtp_port = smtp_port
+            st.session_state.smtp_user = smtp_user
+            st.session_state.smtp_password = smtp_password
+            st.session_state.from_email = from_email
+            st.session_state.use_tls = use_tls
+            st.success("✅ Email settings saved!")
+
+    with col2:
+        if st.button("🧪 Test Connection", use_container_width=True):
+            if not smtp_host or not smtp_user or not smtp_password:
+                st.error("Please fill in all SMTP settings")
+            else:
+                notifier = EmailNotifier(
+                    smtp_host=smtp_host,
+                    smtp_port=smtp_port,
+                    smtp_user=smtp_user,
+                    smtp_password=smtp_password,
+                    from_email=from_email,
+                    use_tls=use_tls
+                )
+
+                success, message = notifier.test_connection()
+                if success:
+                    st.success(f"✅ {message}")
+                else:
+                    st.error(f"❌ {message}")
+
+    # Quick setup guide
+    with st.expander("📖 SMTP Configuration Guide"):
+        st.markdown("""
+        ### Gmail Setup
+        1. Enable 2-Step Verification in your Google Account
+        2. Generate an App Password: Account → Security → 2-Step Verification → App passwords
+        3. Use the app password (not your regular password)
+        4. Settings:
+           - Host: `smtp.gmail.com`
+           - Port: `587`
+           - TLS: Enabled
+
+        ### Outlook/Office 365
+        - Host: `smtp.office365.com`
+        - Port: `587`
+        - TLS: Enabled
+
+        ### Other Providers
+        - Check your email provider's SMTP settings documentation
+        - Most use port 587 with TLS or port 465 with SSL
+        """)
+
+
+def render_reports_page():
+    """Main reports and digest generation page."""
+    st.markdown('<h1 class="main-header">📊 Reports & Digests</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Generate intelligence reports and send digests</p>', unsafe_allow_html=True)
+
+    # Initialize
+    storage = SQLiteStorage()
+    storage.connect()
+    generator = DigestGenerator(storage)
+
+    # Tabs
+    tab_index = 0
+    if st.session_state.get("active_reports_tab"):
+        tabs_list = ["🔧 Report Builder", "💾 Saved Reports", "📧 Email Settings"]
+        if st.session_state.active_reports_tab in tabs_list:
+            tab_index = tabs_list.index(st.session_state.active_reports_tab)
+
+    tab1, tab2, tab3 = st.tabs(["🔧 Report Builder", "💾 Saved Reports", "📧 Email Settings"])
+
+    with tab1:
+        render_report_builder(storage, generator)
+
+    with tab2:
+        render_saved_reports()
+
+    with tab3:
+        render_email_settings()

@@ -1,0 +1,502 @@
+"""Notification rules management UI with history tracking."""
+
+import streamlit as st
+from datetime import datetime
+from typing import List
+
+from src.storage import SQLiteStorage
+from src.models.notification_rule import NotificationRule
+from src.models.notification_log import NotificationLog
+from src.models import EventCategory
+from src.notifiers.email import EmailNotifier
+
+
+def render_rule_builder(storage: SQLiteStorage, rule: NotificationRule = None):
+    """Render the notification rule builder form."""
+    st.markdown("### 🔧 Rule Configuration")
+
+    # Initialize rule if creating new
+    if rule is None:
+        rule = NotificationRule()
+
+    # Get all clients for selection
+    clients = storage.get_all_clients()
+    client_options = {c.id: c.name for c in clients}
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        rule.name = st.text_input(
+            "Rule Name *",
+            value=rule.name,
+            placeholder="e.g., High-Priority Enterprise Alerts",
+            key="rule_name"
+        )
+
+    with col2:
+        rule.is_active = st.toggle(
+            "Active",
+            value=rule.is_active,
+            key="rule_active"
+        )
+
+    rule.description = st.text_area(
+        "Description",
+        value=rule.description,
+        placeholder="Describe what this rule monitors...",
+        key="rule_description"
+    )
+
+    st.divider()
+
+    st.markdown("### 🎯 Trigger Conditions")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Event types
+        all_categories = [cat.value for cat in EventCategory]
+        rule.event_types = st.multiselect(
+            "Event Types to Watch (leave empty for all)",
+            options=all_categories,
+            default=rule.event_types,
+            key="rule_event_types"
+        )
+
+        # Min relevance score
+        rule.min_relevance_score = st.slider(
+            "Minimum Relevance Score",
+            min_value=0.0,
+            max_value=1.0,
+            value=rule.min_relevance_score,
+            step=0.05,
+            format="%.0f%%",
+            key="rule_relevance"
+        )
+
+    with col2:
+        # Client selection
+        selected_client_names = st.multiselect(
+            "Specific Clients (leave empty for all)",
+            options=list(client_options.values()),
+            default=[client_options[cid] for cid in rule.client_ids if cid in client_options],
+            key="rule_clients"
+        )
+        # Convert names back to IDs
+        rule.client_ids = [cid for cid, name in client_options.items() if name in selected_client_names]
+
+        # Keywords
+        keywords_input = st.text_area(
+            "Keywords to Match (one per line)",
+            value="\n".join(rule.keywords) if rule.keywords else "",
+            placeholder="acquisition\nmerger\nlayoffs",
+            key="rule_keywords",
+            height=100
+        )
+        rule.keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+
+    st.divider()
+
+    st.markdown("### 📧 Notification Settings")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Notification method
+        notif_method = st.radio(
+            "Notification Method",
+            options=["Email", "In-App", "Both"],
+            index=0 if rule.notification_type == "email" else 1,
+            key="notif_method",
+            horizontal=True
+        )
+
+        # Map to notification type
+        if notif_method == "Email":
+            rule.notification_type = "email"
+        elif notif_method == "In-App":
+            rule.notification_type = "in_app"
+        else:
+            rule.notification_type = "both"
+
+        rule.frequency = st.selectbox(
+            "Frequency",
+            options=["immediate", "hourly", "daily", "weekly"],
+            index=["immediate", "hourly", "daily", "weekly"].index(rule.frequency),
+            key="rule_frequency",
+            help="How often to send notifications"
+        )
+
+    with col2:
+        # Recipient emails
+        if rule.notification_type in ["email", "both"]:
+            emails_input = st.text_area(
+                "Recipient Emails (one per line) *",
+                value="\n".join(rule.recipient_emails) if rule.recipient_emails else "",
+                placeholder="user@example.com\nteam@company.com",
+                key="rule_emails",
+                height=100
+            )
+            rule.recipient_emails = [e.strip() for e in emails_input.split("\n") if e.strip() and "@" in e]
+        else:
+            st.info("In-app notifications will appear on the dashboard")
+
+    # Validation and action buttons
+    st.divider()
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        # Preview matching events
+        if st.button("🔍 Preview", use_container_width=True):
+            events = storage.get_all_events()
+            matching_events = [e for e in events if rule.matches_event(e)]
+            st.info(f"Found {len(matching_events)} matching events")
+            if matching_events:
+                with st.expander("View Matching Events"):
+                    for event in matching_events[:10]:
+                        st.write(f"- {event.title} (Relevance: {event.relevance_score:.0%})")
+
+    with col2:
+        # Test rule
+        if st.button("🧪 Test", use_container_width=True):
+            if not rule.recipient_emails and rule.notification_type in ["email", "both"]:
+                st.error("Please add recipient emails first")
+            elif not st.session_state.get("smtp_host"):
+                st.error("Please configure SMTP settings first")
+            else:
+                # Send test notification
+                notifier = EmailNotifier(
+                    smtp_host=st.session_state.get("smtp_host"),
+                    smtp_port=st.session_state.get("smtp_port", 587),
+                    smtp_user=st.session_state.get("smtp_user"),
+                    smtp_password=st.session_state.get("smtp_password"),
+                    from_email=st.session_state.get("from_email"),
+                    use_tls=st.session_state.get("use_tls", True)
+                )
+
+                success = notifier.send_alert(
+                    to_emails=rule.recipient_emails,
+                    alert_title=f"Test: {rule.name}",
+                    alert_body=f"This is a test notification for rule: {rule.name}\n\nTrigger conditions:\n- Min relevance: {rule.min_relevance_score:.0%}\n- Event types: {', '.join(rule.event_types) if rule.event_types else 'All'}",
+                    priority="normal"
+                )
+
+                if success:
+                    st.success("✅ Test notification sent!")
+                else:
+                    st.error("❌ Failed to send test notification")
+
+    with col3:
+        # Save button
+        if st.button("💾 Save", use_container_width=True, type="primary"):
+            # Validate
+            if not rule.name:
+                st.error("Rule name is required")
+            elif rule.notification_type in ["email", "both"] and not rule.recipient_emails:
+                st.error("At least one recipient email is required")
+            else:
+                # Save to database
+                if hasattr(rule, '_is_new') or not storage.get_notification_rule(rule.id):
+                    storage.create_notification_rule(rule)
+                    st.success(f"✅ Rule '{rule.name}' created!")
+                else:
+                    rule.updated_at = datetime.utcnow()
+                    storage.update_notification_rule(rule)
+                    st.success(f"✅ Rule '{rule.name}' updated!")
+
+                # Clear session state
+                if "editing_rule_id" in st.session_state:
+                    del st.session_state.editing_rule_id
+                st.rerun()
+
+    with col4:
+        # Cancel button
+        if st.button("❌ Cancel", use_container_width=True):
+            if "editing_rule_id" in st.session_state:
+                del st.session_state.editing_rule_id
+            st.rerun()
+
+
+def render_rule_card(rule: NotificationRule, storage: SQLiteStorage):
+    """Render a single notification rule card."""
+    status_emoji = "🟢" if rule.is_active else "🔴"
+
+    # Add custom styling for active rules
+    border_style = """
+        <style>
+        [data-testid="stVerticalBlock"] > div:has(> .rule-card-wrapper) {
+            margin-bottom: 0 !important;
+        }
+        .rule-card-wrapper {
+            border: 2px solid #10b981;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: rgba(16, 185, 129, 0.05);
+        }
+        .rule-card-wrapper.inactive {
+            border: 1px dashed #6b7280;
+            background-color: rgba(107, 114, 128, 0.02);
+        }
+        </style>
+    """
+    st.markdown(border_style, unsafe_allow_html=True)
+
+    # Use different container class based on active status
+    container_class = "rule-card-wrapper" if rule.is_active else "rule-card-wrapper inactive"
+
+    # Open the wrapper div
+    st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
+
+    # Main rule info
+    col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+
+    with col1:
+        st.markdown(f"**{status_emoji} {rule.name}**")
+        if rule.description:
+            st.caption(rule.description)
+
+    with col2:
+        st.caption(f"**Method:** {rule.notification_type.title()}")
+        st.caption(f"**Frequency:** {rule.frequency.capitalize()}")
+
+    with col3:
+        st.caption(f"**Triggered:** {rule.trigger_count}x")
+        if rule.last_triggered:
+            st.caption(f"Last: {rule.last_triggered.strftime('%m/%d %H:%M')}")
+
+    with col4:
+        if st.button("✏️", key=f"edit_{rule.id}", help="Edit"):
+            st.session_state.editing_rule_id = rule.id
+            st.rerun()
+
+        if st.button("🗑️", key=f"delete_{rule.id}", help="Delete"):
+            storage.delete_notification_rule(rule.id)
+            st.success(f"Deleted: {rule.name}")
+            st.rerun()
+
+    # Details expander
+    with st.expander("📋 View Details"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Trigger Conditions:**")
+            st.write(f"- Min Relevance: {rule.min_relevance_score:.0%}")
+            if rule.event_types:
+                st.write(f"- Event Types: {', '.join(rule.event_types)}")
+            if rule.client_ids:
+                clients = {c.id: c.name for c in storage.get_all_clients()}
+                client_names = [clients.get(cid, cid) for cid in rule.client_ids]
+                st.write(f"- Clients: {', '.join(client_names)}")
+            if rule.keywords:
+                st.write(f"- Keywords: {', '.join(rule.keywords)}")
+
+        with col2:
+            st.markdown("**Recipients:**")
+            if rule.recipient_emails:
+                for email in rule.recipient_emails:
+                    st.write(f"- {email}")
+            else:
+                st.write("- In-app only")
+
+    # Close the wrapper div
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_notification_history(storage: SQLiteStorage):
+    """Render notification history tab."""
+    st.markdown("### 📜 Notification History")
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        filter_status = st.selectbox(
+            "Status",
+            options=["All", "Sent", "Failed", "Pending"],
+            key="history_status"
+        )
+
+    with col2:
+        filter_type = st.selectbox(
+            "Type",
+            options=["All", "Email", "In-App", "Alert"],
+            key="history_type"
+        )
+
+    with col3:
+        limit = st.number_input(
+            "Show Last",
+            min_value=10,
+            max_value=1000,
+            value=50,
+            step=10,
+            key="history_limit"
+        )
+
+    # Get logs with filters
+    status_filter = None if filter_status == "All" else filter_status.lower()
+    logs = storage.get_notification_logs(limit=limit, status=status_filter)
+
+    # Apply type filter
+    if filter_type != "All":
+        logs = [log for log in logs if log.notification_type.lower() == filter_type.lower()]
+
+    if not logs:
+        st.info("No notification history found.")
+        return
+
+    # Display logs
+    for log in logs:
+        status_icon = "✅" if log.status == "sent" else "❌" if log.status == "failed" else "⏳"
+        type_icon = "📧" if log.notification_type == "email" else "📱" if log.notification_type == "in_app" else "🚨"
+
+        with st.container():
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+
+            with col1:
+                st.markdown(f"**{status_icon} {type_icon} {log.subject or log.rule_name}**")
+                st.caption(f"To: {log.recipient}")
+
+            with col2:
+                st.caption(f"Rule: {log.rule_name}")
+                st.caption(f"Type: {log.notification_type}")
+
+            with col3:
+                st.caption(f"Sent: {log.sent_at.strftime('%Y-%m-%d %H:%M')}")
+                st.caption(f"Status: {log.status.capitalize()}")
+
+            with col4:
+                if st.button("👁️", key=f"view_log_{log.id}", help="View details"):
+                    st.session_state.viewing_log_id = log.id
+                    st.rerun()
+
+            # Show error if failed
+            if log.status == "failed" and log.error_message:
+                st.error(f"Error: {log.error_message}")
+
+            st.divider()
+
+    # View log detail modal
+    if st.session_state.get("viewing_log_id"):
+        log = storage.get_notification_log(st.session_state.viewing_log_id)
+        if log:
+            with st.expander("📄 Notification Content", expanded=True):
+                st.markdown(f"**Subject:** {log.subject}")
+                st.markdown(f"**To:** {log.recipient}")
+                st.markdown(f"**Sent:** {log.sent_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                st.markdown(f"**Status:** {log.status.capitalize()}")
+
+                st.divider()
+                st.markdown("**Content:**")
+                st.text(log.content)
+
+                if st.button("Close"):
+                    del st.session_state.viewing_log_id
+                    st.rerun()
+
+
+def render_notifications_page():
+    """Main notifications management page."""
+    st.markdown('<h1 class="main-header">📬 Notification Rules</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Configure automated alerts and track notification history</p>', unsafe_allow_html=True)
+
+    # Initialize storage
+    storage = SQLiteStorage()
+    storage.connect()
+
+    # Check if editing a rule
+    if st.session_state.get("editing_rule_id"):
+        rule_id = st.session_state.editing_rule_id
+        if rule_id == "new":
+            st.info("Creating new notification rule")
+            render_rule_builder(storage, None)
+            return
+        else:
+            rule = storage.get_notification_rule(rule_id)
+            if rule:
+                st.info(f"Editing rule: **{rule.name}**")
+                render_rule_builder(storage, rule)
+                return
+            else:
+                del st.session_state.editing_rule_id
+
+    # Tabs
+    tab1, tab2 = st.tabs(["📋 Rules", "📜 History"])
+
+    # === Rules Tab ===
+    with tab1:
+        # Header actions
+        col1, col2, col3 = st.columns([2, 1, 1])
+
+        with col1:
+            st.markdown("### 📋 Active Rules")
+
+        with col2:
+            show_inactive = st.toggle("Show Inactive", value=False)
+
+        with col3:
+            if st.button("➕ New Rule", use_container_width=True, type="primary"):
+                st.session_state.editing_rule_id = "new"
+                st.rerun()
+
+        # List rules
+        rules = storage.get_all_notification_rules(active_only=not show_inactive)
+
+        if not rules:
+            st.info("No notification rules configured. Click 'New Rule' to create one.")
+        else:
+            # Filter options
+            with st.expander("🔍 Filter Rules"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    filter_frequency = st.multiselect(
+                        "Frequency",
+                        options=["immediate", "hourly", "daily", "weekly"],
+                        default=[]
+                    )
+
+                with col2:
+                    filter_type = st.multiselect(
+                        "Type",
+                        options=["email", "in_app", "both"],
+                        default=[]
+                    )
+
+            # Apply filters
+            filtered_rules = rules
+            if filter_frequency:
+                filtered_rules = [r for r in filtered_rules if r.frequency in filter_frequency]
+            if filter_type:
+                filtered_rules = [r for r in filtered_rules if r.notification_type in filter_type]
+
+            # Display rules
+            for rule in filtered_rules:
+                render_rule_card(rule, storage)
+
+            # Statistics
+            st.divider()
+            st.markdown("### 📊 Statistics")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Total Rules", len(rules))
+
+            with col2:
+                active_count = len([r for r in rules if r.is_active])
+                st.metric("Active", active_count)
+
+            with col3:
+                total_triggers = sum(r.trigger_count for r in rules)
+                st.metric("Total Triggers", total_triggers)
+
+            with col4:
+                recent = len([r for r in rules if r.last_triggered and (datetime.utcnow() - r.last_triggered).days < 7])
+                st.metric("Active (7d)", recent)
+
+    # === History Tab ===
+    with tab2:
+        render_notification_history(storage)

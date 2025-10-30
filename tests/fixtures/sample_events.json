@@ -1,0 +1,108 @@
+{
+  "events": [
+    {
+      "id": "test-event-1",
+      "client_id": "test-client-1",
+      "event_type": "funding",
+      "title": "Acme Corporation raises $50M in Series C funding",
+      "summary": "Acme Corporation announced today that it has raised $50 million in Series C funding led by venture capital firm TechVentures. The funding will be used to expand the company's enterprise software platform and hire additional engineering talent.",
+      "source_url": "https://example.com/news/acme-funding",
+      "source_name": "TechNews",
+      "published_date": "2024-10-10T14:30:00",
+      "discovered_date": "2024-10-10T15:00:00",
+      "relevance_score": 0.95,
+      "sentiment": "positive",
+      "sentiment_score": 0.85,
+      "status": "new",
+      "tags": ["funding", "series-c", "venture-capital"],
+      "user_notes": null,
+      "metadata": {
+        "amount": 50000000,
+        "investors": ["TechVentures", "GrowthFund"]
+      }
+    },
+    {
+      "id": "test-event-2",
+      "client_id": "test-client-1",
+      "event_type": "product",
+      "title": "Acme launches new AI-powered analytics platform",
+      "summary": "Acme Corporation has unveiled its latest product, an AI-powered analytics platform designed to help enterprises make data-driven decisions. The platform uses machine learning to provide real-time insights and predictive analytics.",
+      "source_url": "https://example.com/news/acme-product-launch",
+      "source_name": "BusinessWire",
+      "published_date": "2024-10-08T09:00:00",
+      "discovered_date": "2024-10-08T09:30:00",
+      "relevance_score": 0.88,
+      "sentiment": "positive",
+      "sentiment_score": 0.75,
+      "status": "reviewed",
+      "tags": ["product-launch", "ai", "analytics"],
+      "user_notes": "Important product launch - follow up with client",
+      "metadata": {
+        "product_name": "Acme Analytics Pro"
+      }
+    },
+    {
+      "id": "test-event-3",
+      "client_id": "test-client-2",
+      "event_type": "partnership",
+      "title": "TechStart Inc partners with Microsoft Azure",
+      "summary": "TechStart Inc announced a strategic partnership with Microsoft Azure to integrate its AI capabilities into Azure's cloud platform. This partnership will enable TechStart to reach millions of Azure customers worldwide.",
+      "source_url": "https://example.com/news/techstart-microsoft",
+      "source_name": "CloudTech",
+      "published_date": "2024-10-12T11:00:00",
+      "discovered_date": "2024-10-12T11:15:00",
+      "relevance_score": 0.92,
+      "sentiment": "positive",
+      "sentiment_score": 0.90,
+      "status": "new",
+      "tags": ["partnership", "microsoft", "azure", "cloud"],
+      "user_notes": null,
+      "metadata": {
+        "partner": "Microsoft",
+        "platform": "Azure"
+      }
+    },
+    {
+      "id": "test-event-4",
+      "client_id": "test-client-3",
+      "event_type": "regulatory",
+      "title": "Global Finance Corp faces new compliance requirements",
+      "summary": "Global Finance Corp announced it will implement new compliance measures in response to updated financial regulations. The company expects to invest $10 million in compliance infrastructure over the next year.",
+      "source_url": "https://example.com/news/globalfinance-compliance",
+      "source_name": "Financial Times",
+      "published_date": "2024-10-05T16:00:00",
+      "discovered_date": "2024-10-05T16:30:00",
+      "relevance_score": 0.75,
+      "sentiment": "neutral",
+      "sentiment_score": 0.50,
+      "status": "archived",
+      "tags": ["regulatory", "compliance", "finance"],
+      "user_notes": "Monitor for impact on operations",
+      "metadata": {
+        "investment": 10000000,
+        "timeline": "12 months"
+      }
+    },
+    {
+      "id": "test-event-5",
+      "client_id": "test-client-3",
+      "event_type": "financial",
+      "title": "Global Finance Corp reports record Q3 earnings",
+      "summary": "Global Finance Corp reported record third-quarter earnings, with revenue up 25% year-over-year. The strong performance was driven by increased demand for digital banking services and successful cost management initiatives.",
+      "source_url": "https://example.com/news/globalfinance-earnings",
+      "source_name": "Reuters",
+      "published_date": "2024-10-14T08:00:00",
+      "discovered_date": "2024-10-14T08:15:00",
+      "relevance_score": 0.90,
+      "sentiment": "positive",
+      "sentiment_score": 0.80,
+      "status": "new",
+      "tags": ["earnings", "financial-results", "quarterly"],
+      "user_notes": null,
+      "metadata": {
+        "revenue_growth": "25%",
+        "quarter": "Q3 2024"
+      }
+    }
+  ]
+}
